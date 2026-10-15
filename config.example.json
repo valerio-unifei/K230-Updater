@@ -1,0 +1,8 @@
+{
+  "repo": "owner/private-repo",
+  "token": "github_pat_xxx (fine-grained, Contents: read-only)",
+  "branch": "main",
+  "wdt_timeout": 10,
+  "max_fails": 3,
+  "confirm_after": 60
+}
