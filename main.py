@@ -23,10 +23,11 @@ def connect():
 with open("/sdcard/config.json") as f:
     cfg = json.load(f)
 
-g = Guard(cfg["repo"], cfg["token"], branch=cfg.get("branch", "main"),
+g = Guard(cfg.get("repo"), cfg.get("token"), branch=cfg.get("branch", "main"),
           wdt_timeout=cfg.get("wdt_timeout", 10),
           max_fails=cfg.get("max_fails", 3),
           confirm_after=cfg.get("confirm_after", 60),
-          connect=connect)
+          connect=connect,
+          update_url=cfg.get("update_url"))
 k230_updater.set_guard(g)
 g.boot()

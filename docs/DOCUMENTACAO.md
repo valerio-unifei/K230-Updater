@@ -32,6 +32,8 @@ Cartão SD:
 | `repo` | — | `"dono/repositorio"` privado |
 | `token` | — | PAT *fine-grained* com permissão **Contents: Read-only** apenas nesse repositório |
 | `branch` | `main` | Branch lida |
+| `update_url` | — | Se definido, usa a fonte HTTP/zip (seção 2b) em vez do GitHub |
+| `report_url` | — | URL do POST do exemplo de segmentação |
 | `wdt_timeout` | `10` | Timeout do watchdog (s) |
 | `max_fails` | `3` | Falhas antes de proibir a versão e voltar |
 | `confirm_after` | `60` | Segundos alimentando o WDT para considerar a versão boa |
@@ -67,6 +69,34 @@ models/detector.kmodel
 - Gerar hash: `python -c "import hashlib,sys;print(hashlib.sha256(open(sys.argv[1],'rb').read()).hexdigest())" arquivo`
 
 O app baixado executa com `cwd` e `sys.path` em `/sdcard/app/current`, então `models/detector.kmodel` é aberto por caminho relativo. Veja `examples/app_main.py`.
+
+## 2b. Fonte de atualização HTTP (zip)
+
+Alternativa ao GitHub: defina `"update_url"` no `config.json` (ou `Guard(..., update_url=...)`). A cada boot a placa faz:
+
+```
+GET <update_url>?chipid=<id hex do K230>&last_update=<data da última atualização>
+```
+
+- `last_update`: campo `updated_at` do manifesto instalado (vazio se nada instalado).
+- Resposta `204`/`304`: sem novidade. `200`: corpo é um **zip** com `main.py`, `models/*.kmodel` etc.
+- Versão: `manifest.json` dentro do zip (opcional) ou cabeçalho `X-Version`; data: `updated_at` do manifesto ou cabeçalho `X-Updated-At` (senão, hora local da placa). Se nada definir a versão, a atualização falha.
+- Se `token` estiver no config, é enviado como `Authorization: Bearer`.
+- Versões proibidas pelo salva-guarda são descartadas após o download.
+- Zip: use **sem compressão** (`zip -0`) para modelos grandes (extração em blocos); entradas deflate são lidas inteiras na RAM e exigem `deflate`/`zlib`/`uzlib` no firmware. Caminhos com `..` ou absolutos são rejeitados.
+- O chip id vem de `machine.chipid()` (`k230_updater.device.chip_id()`); confira no seu firmware.
+
+Servidor de referência (PC): `python examples/server.py` (GET `/update`, POST `/report`).
+
+## 2c. Exemplo completo: segmentação + relatório
+
+`examples/segmentation_app/main.py` (copie para o pacote junto com `models/yolov8n_seg.kmodel`): captura da câmera, inferência YOLOv8-seg com `nncase_runtime`, NMS, contagem de objetos e área de máscara, FPS controlado por `Thermal`, e `POST` a cada `REPORT_EVERY_S` segundos para `report_url`:
+
+```json
+{"chipid": "...", "objects": 3, "temp": 61.5, "mask_pixels": 1234}
+```
+
+É um modelo de partida **não testado**: ajuste tamanho de entrada, classes, normalização e chamadas de mídia ao seu modelo/firmware.
 
 ## 3. Fluxo de boot e salva-guarda
 

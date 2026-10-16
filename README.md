@@ -3,6 +3,8 @@ MicroPython library for CanMV K230: remote updates from a private GitHub repo (m
 
 Full documentation (Portuguese): [docs/DOCUMENTACAO.md](docs/DOCUMENTACAO.md)
 
+HTTP zip updates (`update_url`: `GET ?chipid=..&last_update=..`) and a segmentation example (`examples/segmentation_app`, `examples/server.py`) are described there.
+
 ## SD card layout
 ```
 /sdcard/main.py          launcher (this repo's main.py, never updated remotely)
