@@ -26,8 +26,9 @@ from .updater import Updater
 class Guard:
     def __init__(self, repo, token, root="/sdcard/app", branch="main",
                  wdt_timeout=10, wdt_id=1, max_fails=3, confirm_after=60,
-                 retry_interval=60, connect=None):
-        """connect: optional callable that brings the network up (may raise)."""
+                 retry_interval=60, connect=None, update_url=None):
+        """connect: optional callable that brings the network up (may raise).
+        update_url: use the HTTP/zip update source instead of GitHub (see Updater)."""
         self.root = root
         self.max_fails = max_fails
         self.confirm_after = confirm_after
@@ -39,7 +40,8 @@ class Guard:
         self._trial_start = None
         self.state_path = root + "/state.json"
         util.makedirs(root)
-        self.updater = Updater(repo, token, root, branch, feed=self.feed)
+        self.updater = Updater(repo, token, root, branch, feed=self.feed,
+                               url=update_url)
         self.state = util.read_json(self.state_path, {}) or {}
         self.state.setdefault("status", "ok")
         self.state.setdefault("fails", 0)

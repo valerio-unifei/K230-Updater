@@ -2,6 +2,8 @@
   "repo": "owner/private-repo",
   "token": "github_pat_xxx (fine-grained, Contents: read-only)",
   "branch": "main",
+  "update_url": "",
+  "report_url": "https://example.com/api/report",
   "wdt_timeout": 10,
   "max_fails": 3,
   "confirm_after": 60

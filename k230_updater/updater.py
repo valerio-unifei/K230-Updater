@@ -29,9 +29,32 @@ try:
 except ImportError:
     import binascii
 
-from . import util
+from . import util, device, ziputil
 
 CHUNK = 4096
+
+
+def _quote(s):
+    out = ""
+    for c in s:
+        if c.isalpha() or c.isdigit() or c in "-_.~":
+            out += c
+        else:
+            out += "%%%02X" % ord(c)
+    return out
+
+
+def _header(headers, name):
+    for k in headers:
+        if k.lower() == name.lower():
+            return str(headers[k])
+    return None
+
+
+def _now_iso():
+    import time
+    t = time.localtime()
+    return "%04d-%02d-%02dT%02d:%02d:%02d" % t[:6]
 
 
 class UpdateError(Exception):
@@ -39,9 +62,13 @@ class UpdateError(Exception):
 
 
 class Updater:
-    def __init__(self, repo, token, root="/sdcard/app", branch="main", feed=None):
+    def __init__(self, repo, token, root="/sdcard/app", branch="main", feed=None,
+                 url=None):
         """repo: 'owner/name'. token: fine-grained PAT with Contents:read.
-        feed: callable invoked during downloads (feed the hardware watchdog)."""
+        feed: callable invoked during downloads (feed the hardware watchdog).
+        url: if set, HTTP mode: GET url?chipid=..&last_update=.. returns a zip
+        (repo is then ignored; token, if any, is sent as a Bearer header)."""
+        self.url = url
         self.repo = repo
         self.token = token
         self.branch = branch
@@ -107,6 +134,12 @@ class Updater:
         if expected_sha and digest != expected_sha.lower():
             raise UpdateError("sha256 mismatch for " + rel)
 
+    def _swap(self):
+        util.rmtree(self.previous)
+        if util.exists(self.current):
+            os.rename(self.current, self.previous)
+        os.rename(self.staging, self.current)
+
     def install(self, manifest):
         """Download every file to staging, verify, then swap into place."""
         util.rmtree(self.staging)
@@ -120,13 +153,71 @@ class Updater:
         except Exception:
             util.rmtree(self.staging)
             raise
-        util.rmtree(self.previous)
-        if util.exists(self.current):
-            os.rename(self.current, self.previous)
-        os.rename(self.staging, self.current)
+        self._swap()
+
+    def _check_http(self, skip_versions):
+        """GET url?chipid=<id>&last_update=<date>. 200 = zip body, 204/304 = up to date."""
+        local = self.local_manifest() or {}
+        last = str(local.get("updated_at", ""))
+        sep = "&" if "?" in self.url else "?"
+        url = "%s%schipid=%s&last_update=%s" % (
+            self.url, sep, device.chip_id(), _quote(last))
+        headers = {"User-Agent": "k230-updater"}
+        if self.token:
+            headers["Authorization"] = "Bearer " + self.token
+        resp = requests.get(url, headers=headers)
+        zip_path = self.root + "/update.zip"
+        try:
+            if resp.status_code in (204, 304):
+                return None
+            if resp.status_code != 200:
+                raise UpdateError("GET update -> HTTP %d" % resp.status_code)
+            hdr = getattr(resp, "headers", None) or {}
+            header_version = _header(hdr, "X-Version")
+            header_date = _header(hdr, "X-Updated-At")
+            with open(zip_path, "wb") as f:
+                raw = getattr(resp, "raw", None)
+                if raw is not None and hasattr(raw, "read"):
+                    while True:
+                        buf = raw.read(CHUNK)
+                        if not buf:
+                            break
+                        f.write(buf)
+                        self.feed()
+                else:
+                    f.write(resp.content)
+        finally:
+            resp.close()
+            gc.collect()
+
+        util.rmtree(self.staging)
+        util.makedirs(self.staging)
+        try:
+            ziputil.extract(zip_path, self.staging, self.feed)
+            manifest = util.read_json(self.staging + "/manifest.json", {}) or {}
+            version = str(manifest.get("version") or header_version or header_date or "")
+            if not version:
+                raise UpdateError("zip has no version (manifest.json or X-Version)")
+            if version in skip_versions:
+                util.rmtree(self.staging)
+                return None
+            manifest["version"] = version
+            manifest.setdefault("entry", "main.py")
+            manifest["updated_at"] = str(
+                manifest.get("updated_at") or header_date or _now_iso())
+            util.write_json(self.staging + "/manifest.json", manifest)
+        except Exception:
+            util.rmtree(self.staging)
+            raise
+        finally:
+            util.rmtree(zip_path)
+        self._swap()
+        return version
 
     def check_and_install(self, skip_versions=()):
         """Returns the installed version string, or None if nothing to do."""
+        if self.url:
+            return self._check_http(skip_versions)
         manifest = self.remote_manifest()
         version = str(manifest["version"])
         local = self.local_manifest()
